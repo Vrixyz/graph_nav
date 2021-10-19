@@ -1,0 +1,3 @@
+[tasks.web]
+command = "wasm-pack"
+args = ["build", "-d", "../../web/pkg"]

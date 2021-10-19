@@ -1,3 +1,10 @@
+use std::cmp::Ordering;
+
+use crate::danger::{
+    danger_zone_grow_speedup, DangerSpeedModifier, SpawnDangerZone, SpawnDangerZoneCommand,
+};
+use crate::graphics_rooms::{create_room, RoomGraphic};
+use crate::AppState;
 use crate::{
     danger::{
         check_player_death, grow_danger_zone, update_danger_visual, DangerZone, GrowDangerZone,
@@ -5,6 +12,7 @@ use crate::{
     math_utils,
     poisson::Poisson,
 };
+use bevy::render::camera;
 use bevy::{prelude::*, render::camera::OrthographicProjection, utils::HashMap};
 use bevy_prototype_lyon::{
     prelude::*,
@@ -22,6 +30,7 @@ pub struct DisplayRoomReachable;
 pub struct Room {
     pub connections: Vec<RoomId>,
     pub position: (f32, f32),
+    pub room_type: RoomType,
 }
 
 #[derive(Default)]
@@ -29,8 +38,23 @@ pub struct MapDef {
     pub rooms: HashMap<RoomId, Room>,
 }
 
+#[derive(Clone, PartialEq)]
+pub enum RoomType {
+    Danger,
+    Safe,
+    Coins,
+    Price(u32),
+}
+
+impl Default for RoomType {
+    fn default() -> Self {
+        Self::Safe
+    }
+}
+
 pub struct MapCreateRoom {
     from_room_id: RoomId,
+    room_type: RoomType,
 }
 
 pub struct MapPosition {
@@ -49,23 +73,48 @@ pub enum UserInput {
     Click(Vec2),
 }
 
+pub struct Coins {
+    pub amount: u32,
+}
+
+pub struct PermanentEntity;
+
 impl Plugin for MapGraphPlugin {
     fn build(&self, app: &mut AppBuilder) {
         app.add_plugin(ShapePlugin);
-        app.add_startup_system(create_map.system());
-        app.add_startup_system_to_stage(StartupStage::PostStartup, init_display_map.system());
-        app.add_system(update_player_position.system());
-        //app.add_system(input_player_position.system());
-        app.add_system(base_input.system().label("base_input"));
-        app.add_system(handle_input.system().after("base_input"));
-        app.add_system(create_new_rooms.system());
-        app.add_system(check_player_death.system());
-        app.add_system(grow_danger_zone.system());
-        app.add_system(update_danger_visual.system());
-        app.add_system(update_map_reachabiliy.system());
-        app.add_system(react_to_move_player.system());
-        app.add_system(update_camera_position.system());
+        let loading_startup_system_set =
+            SystemSet::on_enter(AppState::Loading).with_system(create_map.system());
+        app.add_system_set(loading_startup_system_set);
+        let loading_update_system_set =
+            SystemSet::on_update(AppState::Loading).with_system(loading_update.system());
+        app.add_system_set(loading_update_system_set);
+
+        let game_startup_system_set =
+            SystemSet::on_enter(AppState::Game).with_system(init_display_map.system());
+        app.add_system_set(game_startup_system_set);
+
+        let game_exit_system_set =
+            SystemSet::on_exit(AppState::Game).with_system(game_cleanup.system());
+        app.add_system_set(game_exit_system_set);
+
+        let game_update_system_set = SystemSet::on_update(AppState::Game)
+            .with_system(update_player_position.system())
+            .with_system(base_input.system().label("base_input"))
+            .with_system(handle_input.system().after("base_input"))
+            .with_system(create_new_rooms.system())
+            .with_system(SpawnDangerZone.system())
+            .with_system(check_player_death.system())
+            .with_system(grow_danger_zone.system())
+            .with_system(update_danger_visual.system())
+            .with_system(update_map_reachabiliy.system())
+            .with_system(react_to_move_player.system())
+            .with_system(update_camera_position.system())
+            .with_system(danger_zone_grow_speedup.system());
+        app.add_system_set(game_update_system_set);
+
         app.insert_resource(UserInputs::default());
+        app.insert_resource(DangerSpeedModifier { multiplier: 1f32 });
+        app.insert_resource(Coins { amount: 0u32 });
     }
 }
 
@@ -87,15 +136,28 @@ fn update_camera_position(
     }
     target /= position_count as f32;
     for mut camera in qs.q0_mut().iter_mut() {
+        target.z = camera.translation.z;
         camera.translation =
-            math_utils::move_towards(camera.translation, target, 100f32 * time.delta_seconds());
+            math_utils::move_towards(camera.translation, target, 500f32 * time.delta_seconds());
     }
+}
+
+fn game_cleanup(mut commands: Commands, to_remove: Query<Entity, Without<PermanentEntity>>) {
+    for e in to_remove.iter() {
+        commands.entity(e).despawn();
+    }
+}
+
+fn loading_update(mut state: ResMut<State<AppState>>) {
+    state.set(AppState::Game);
 }
 
 fn create_map(mut commands: Commands) {
     let mut cameraBundle = OrthographicCameraBundle::new_2d();
     cameraBundle.orthographic_projection.scale = 0.8;
     commands.spawn_bundle(cameraBundle).insert(MainCamera);
+    commands.insert_resource(Coins { amount: 0u32 });
+    commands.insert_resource(DangerSpeedModifier { multiplier: 1f32 });
 
     let mut positions = vec![(0f32, 0f32)];
     let poisson = Poisson::new();
@@ -108,6 +170,7 @@ fn create_map(mut commands: Commands) {
             Room {
                 connections: Default::default(),
                 position: positions[i],
+                room_type: RoomType::Safe,
             },
         );
     }
@@ -132,6 +195,7 @@ fn create_map(mut commands: Commands) {
             let new_room = Room {
                 connections: vec![root_index],
                 position: new_position,
+                room_type: RoomType::Safe,
             };
             {
                 new_map.rooms.insert(room_id_to_create, new_room);
@@ -144,28 +208,11 @@ fn create_map(mut commands: Commands) {
     }
     commands.insert_resource(new_map);
     commands.insert_resource(MapPosition { pos_id: RoomId(0) });
-
-    let mut circle_transform = Transform::from_xyz(15.0, 15.0, 0.0);
-    circle_transform.scale = Vec3::ONE;
-    let circle = GeometryBuilder::build_as(
-        &Circle {
-            radius: 10f32,
-            center: Vec2::ZERO,
-        },
-        ShapeColors::outlined(Color::NONE, Color::RED),
-        DrawMode::Outlined {
-            fill_options: FillOptions::default(),
-            outline_options: StrokeOptions::default().with_line_width(3.0),
-        },
-        Transform::from_xyz(15.0, 15.0, 0.0),
-    );
-    commands
-        .spawn()
-        .insert_bundle(circle)
-        .insert(DangerZone { size: 1f32 })
-        .insert(GrowDangerZone {
-            radius_increase_per_second: 10f32,
-        });
+    // Spawn a first danger zone
+    commands.spawn().insert(SpawnDangerZoneCommand {
+        position: [15f32, 15f32].into(),
+        radius_increase_per_second: 15f32,
+    });
 }
 
 fn init_display_map(mut commands: Commands, map: Res<MapDef>) {
@@ -176,7 +223,7 @@ fn init_display_map(mut commands: Commands, map: Res<MapDef>) {
     let mut visit_index = RoomId(0);
     while visit_index.0 < visit_queue.len() {
         let room = &map.rooms[visit_queue[visit_index.0]];
-        create_room(&mut commands, room, visit_index, Some(DisplayRoomReachable));
+        create_room(&mut commands, room, visit_index, true);
         for connection in &room.connections {
             create_link(&mut commands, &map.rooms[connection], room);
             if !visit_queue.contains(&connection) {
@@ -235,33 +282,31 @@ fn update_map_reachabiliy(
     mut timer: Local<f32>,
     map: Res<MapDef>,
     player_pos: Res<MapPosition>,
-    rooms: Query<(Entity, &RoomId)>,
+    mut rooms: Query<(Entity, &RoomId, &mut RoomGraphic)>,
 ) {
     *timer += time.delta_seconds();
-    if *timer < 0.1f32 {
+    if *timer < 0.2f32 {
         return;
     }
     *timer = 0f32;
     let current_room = &map.rooms[&player_pos.pos_id];
-    for (e, r) in rooms.iter() {
-        let room_to_update = &map.rooms[&r];
-        if current_room.connections.contains(&r) {
-            let isReachable = Some(DisplayRoomReachable);
-            let new_room = create_room_bundle(&isReachable, room_to_update);
-            commands.entity(e).insert_bundle(new_room);
-            commands.entity(e).insert(isReachable);
-        } else {
-            let isReachable: Option<DisplayRoomReachable> = None;
-            let new_room = create_room_bundle(&isReachable, room_to_update);
-            commands.entity(e).insert_bundle(new_room);
-            commands.entity(e).insert(isReachable);
+    for (e, r, mut g) in rooms.iter_mut() {
+        let room_to_update = &map.rooms[r];
+        let is_reachable = current_room.connections.contains(r);
+        if let Some(update_components) = g.updateReachability(is_reachable, room_to_update) {
+            commands
+                .entity(e)
+                .insert_bundle(update_components.0)
+                .insert(update_components.1);
         }
     }
 }
 
 fn react_to_move_player(
     mut commands: Commands,
-    map: Res<MapDef>,
+    mut coins: ResMut<Coins>,
+    mut map: ResMut<MapDef>,
+    mut danger_zone_grow_speedup: ResMut<DangerSpeedModifier>,
     position_changed: Res<MapPosition>,
 ) {
     if !position_changed.is_changed() {
@@ -269,25 +314,90 @@ fn react_to_move_player(
     }
     commands.spawn().insert(MapCreateRoom {
         from_room_id: position_changed.pos_id,
+        room_type: RoomType::Safe,
     });
     commands.spawn().insert(MapCreateRoom {
         from_room_id: position_changed.pos_id,
+        room_type: RoomType::Danger,
     });
-    // TODO: update reachable rooms display
+    commands.spawn().insert(MapCreateRoom {
+        from_room_id: position_changed.pos_id,
+        room_type: RoomType::Coins,
+    });
+    commands.spawn().insert(MapCreateRoom {
+        from_room_id: position_changed.pos_id,
+        room_type: RoomType::Price(10),
+    });
+
+    if let Some(r) = map.rooms.get(&position_changed.pos_id) {
+        let current_position = [r.position.0, r.position.1].into();
+        let direction_for_danger: Vec2 = {
+            let mut direction = Vec2::ZERO;
+            for i in 0..r.connections.len() {
+                let mut direction_to_room: Vec2 = map
+                    .rooms
+                    .get(&r.connections[i])
+                    .expect("map is incorrect")
+                    .position
+                    .into();
+                direction_to_room -= current_position;
+                direction_to_room = direction_to_room.normalize_or_zero();
+                direction += direction_to_room;
+            }
+            direction = direction.normalize_or_zero();
+            direction * 30f32
+        };
+        match r.room_type {
+            RoomType::Safe => {}
+            RoomType::Danger => {
+                commands.spawn().insert(SpawnDangerZoneCommand {
+                    position: direction_for_danger + current_position,
+                    radius_increase_per_second: 10f32,
+                });
+            }
+            RoomType::Coins => {
+                coins.amount += 1;
+            }
+            RoomType::Price(price) => {
+                coins.amount = (coins.amount - price).max(0);
+                danger_zone_grow_speedup.multiplier *= 0.5f32;
+            }
+        }
+        if r.room_type != RoomType::Safe {
+            // We visited this room so reset its type to Safe.
+            if let Some(r) = map.rooms.get_mut(&position_changed.pos_id) {
+                r.room_type = RoomType::Safe;
+            }
+        }
+    }
 }
 
 fn handle_input(
-    mut commands: Commands,
     map: Res<MapDef>,
+    coins: Res<Coins>,
     mut inputs: ResMut<UserInputs>,
     mut position: ResMut<MapPosition>,
 ) {
+    let current_room = map.rooms.get(&position.pos_id).unwrap();
     for click in inputs.list.iter() {
         let UserInput::Click(click) = click;
         for id in map.rooms.keys() {
+            if !current_room.connections.contains(id) {
+                continue;
+            }
             let r = map.rooms.get(id).unwrap();
+            match r.room_type {
+                RoomType::Danger => {}
+                RoomType::Safe => {}
+                RoomType::Coins => {}
+                RoomType::Price(price) => {
+                    if coins.amount < price {
+                        // TODO: spawn a feedback: not enough coins!
+                        continue;
+                    }
+                }
+            };
             let room_position = Vec2::new(r.position.0, r.position.1);
-
             let distance_to_room = room_position.distance(*click);
             if distance_to_room < 15.0 {
                 position.pos_id = *id;
@@ -303,6 +413,7 @@ fn create_new_rooms(
     mut map: ResMut<MapDef>,
     q_create: Query<(Entity, &MapCreateRoom)>,
 ) {
+    let min_distance_between_rooms = 40f32;
     for (e, create) in q_create.iter() {
         let mut rng = rand::thread_rng();
         let poisson = Poisson::new();
@@ -310,9 +421,13 @@ fn create_new_rooms(
 
         let room_id_to_create = RoomId(map.rooms.len());
         if let Some(ref_point) = map.rooms.get(&create.from_room_id).map(|f| f.position) {
-            if let Some(new_position) =
-                poisson.compute_new_position(&existing_points, &ref_point, 40f32, 10, &mut rng)
-            {
+            if let Some(new_position) = poisson.compute_new_position(
+                &existing_points,
+                &ref_point,
+                min_distance_between_rooms,
+                10,
+                &mut rng,
+            ) {
                 {
                     map.rooms
                         .entry(create.from_room_id)
@@ -320,21 +435,39 @@ fn create_new_rooms(
                         .connections
                         .push(room_id_to_create);
                 }
-                let new_room = Room {
+                let mut new_room = Room {
                     connections: vec![create.from_room_id],
                     position: new_position,
+                    room_type: create.room_type.clone(),
                 };
-                create_room(
-                    &mut commands,
-                    &new_room,
-                    room_id_to_create,
-                    Some(DisplayRoomReachable),
-                );
+                create_room(&mut commands, &new_room, room_id_to_create, true);
                 create_link(
                     &mut commands,
                     map.rooms.get(&create.from_room_id).unwrap(),
                     &new_room,
                 );
+
+                let origin_position = map.rooms.get(&create.from_room_id).unwrap().position;
+                let mut existing_point_without_origin = existing_points.clone();
+                existing_point_without_origin.retain(|r| r != &origin_position);
+                let (closest_point, dist_sqrd) =
+                    find_closest(&existing_point_without_origin, &new_position);
+
+                if dist_sqrd < (min_distance_between_rooms * 1.5f32).powi(2) {
+                    let r1 = map
+                        .rooms
+                        .iter_mut()
+                        .find(|r| r.1.position == (closest_point.x, closest_point.y))
+                        .map(|room_from| {
+                            room_from.1.connections.push(room_id_to_create);
+                            room_from.0.clone()
+                        });
+                    if let Some(r1) = r1 {
+                        new_room.connections.push(r1);
+                        create_link(&mut commands, map.rooms.get(&r1).unwrap(), &new_room);
+                    }
+                }
+
                 {
                     map.rooms.insert(room_id_to_create, new_room);
                 }
@@ -342,6 +475,21 @@ fn create_new_rooms(
             commands.entity(e).despawn();
         }
     }
+}
+
+fn find_closest(existing_points: &[(f32, f32)], ref_point: &(f32, f32)) -> (Vec2, f32) {
+    let mut closest: Vec2 = Vec2::new(0f32, 0f32);
+    let mut distance = f32::MAX;
+    let ref_point = Vec2::new(ref_point.0, ref_point.1);
+    for p in existing_points.iter() {
+        let new_closest = Vec2::new(p.0, p.1);
+        let new_distance = new_closest.distance_squared(ref_point);
+        if new_distance < distance {
+            closest = new_closest;
+            distance = new_distance;
+        }
+    }
+    (closest, distance)
 }
 
 fn update_player_position(
@@ -367,48 +515,9 @@ fn create_link(commands: &mut Commands, from: &Room, to: &Room) {
         ShapeColors::outlined(Color::CYAN, Color::BLACK),
         DrawMode::Outlined {
             fill_options: FillOptions::default(),
-            outline_options: StrokeOptions::default().with_line_width(3.0),
+            outline_options: StrokeOptions::default().with_line_width(2.0),
         },
         Transform::from_xyz(0.0, 0.0, 0.0),
     );
     commands.spawn_bundle(character);
-}
-
-fn create_room(
-    commands: &mut Commands,
-    room: &Room,
-    id: RoomId,
-    is_reachable: Option<DisplayRoomReachable>,
-) {
-    let character = create_room_bundle(&is_reachable, room);
-    let mut spawning = commands.spawn_bundle(character);
-    spawning.insert(id);
-    spawning.insert(is_reachable);
-}
-
-fn create_room_bundle(
-    is_reachable: &Option<DisplayRoomReachable>,
-    room: &Room,
-) -> bevy_prototype_lyon::entity::ShapeBundle {
-    let character = GeometryBuilder::build_as(
-        &RegularPolygon {
-            sides: 3,
-            feature: RegularPolygonFeature::Radius(10.0),
-            ..RegularPolygon::default()
-        },
-        ShapeColors::outlined(
-            if is_reachable.is_some() {
-                Color::GREEN
-            } else {
-                Color::GRAY
-            },
-            Color::BLACK,
-        ),
-        DrawMode::Outlined {
-            fill_options: FillOptions::default(),
-            outline_options: StrokeOptions::default().with_line_width(3.0),
-        },
-        Transform::from_xyz(room.position.0, room.position.1, 0.0),
-    );
-    character
 }
