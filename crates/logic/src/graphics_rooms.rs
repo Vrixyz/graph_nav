@@ -1,3 +1,5 @@
+use std::ops::Mul;
+
 use bevy::{ecs::system::EntityCommands, prelude::*};
 use bevy_prototype_lyon::{entity::ShapeBundle, prelude::*, shapes::RegularPolygon};
 
@@ -53,7 +55,7 @@ fn create_room_bundle(
                     crate::map_graph::RoomType::Price(_) => Color::FUCHSIA,
                 }
             } else {
-                Color::GRAY
+                Color::GRAY * 0.5
             },
             Color::BLACK,
         ),

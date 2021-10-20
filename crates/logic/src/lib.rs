@@ -4,10 +4,12 @@ use map_graph::{Coins, MapGraphPlugin};
 use wasm_bindgen::prelude::*;
 
 pub mod danger;
+pub mod delayed_destroy;
 pub mod graphics_rooms;
 pub mod map_graph;
 pub mod math_utils;
 mod poisson;
+pub mod text_feedback;
 use graphics_rooms::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

@@ -1,14 +1,12 @@
-use std::cmp::Ordering;
-
 use crate::danger::{
     danger_zone_grow_speedup, DangerSpeedModifier, SpawnDangerZone, SpawnDangerZoneCommand,
 };
+use crate::delayed_destroy::destroy_after;
 use crate::graphics_rooms::{create_room, RoomGraphic};
+use crate::text_feedback::{show_text_feedback, spawn_text_feedback, TextFeedbackSpawn};
 use crate::AppState;
 use crate::{
-    danger::{
-        check_player_death, grow_danger_zone, update_danger_visual, DangerZone, GrowDangerZone,
-    },
+    danger::{check_player_death, grow_danger_zone, update_danger_visual},
     math_utils,
     poisson::Poisson,
 };
@@ -109,7 +107,10 @@ impl Plugin for MapGraphPlugin {
             .with_system(update_map_reachabiliy.system())
             .with_system(react_to_move_player.system())
             .with_system(update_camera_position.system())
-            .with_system(danger_zone_grow_speedup.system());
+            .with_system(danger_zone_grow_speedup.system())
+            .with_system(spawn_text_feedback.system())
+            .with_system(destroy_after.system())
+            .with_system(show_text_feedback.system());
         app.add_system_set(game_update_system_set);
 
         app.insert_resource(UserInputs::default());
@@ -154,7 +155,7 @@ fn loading_update(mut state: ResMut<State<AppState>>) {
 
 fn create_map(mut commands: Commands) {
     let mut cameraBundle = OrthographicCameraBundle::new_2d();
-    cameraBundle.orthographic_projection.scale = 0.8;
+    cameraBundle.orthographic_projection.scale = 0.3;
     commands.spawn_bundle(cameraBundle).insert(MainCamera);
     commands.insert_resource(Coins { amount: 0u32 });
     commands.insert_resource(DangerSpeedModifier { multiplier: 1f32 });
@@ -326,7 +327,7 @@ fn react_to_move_player(
     });
     commands.spawn().insert(MapCreateRoom {
         from_room_id: position_changed.pos_id,
-        room_type: RoomType::Price(10),
+        room_type: RoomType::Price(7),
     });
 
     if let Some(r) = map.rooms.get(&position_changed.pos_id) {
@@ -373,6 +374,7 @@ fn react_to_move_player(
 }
 
 fn handle_input(
+    mut commands: Commands,
     map: Res<MapDef>,
     coins: Res<Coins>,
     mut inputs: ResMut<UserInputs>,
@@ -393,6 +395,10 @@ fn handle_input(
                 RoomType::Price(price) => {
                     if coins.amount < price {
                         // TODO: spawn a feedback: not enough coins!
+                        commands.spawn().insert(TextFeedbackSpawn {
+                            text: format!("Not enough coins\n{}/{}", coins.amount, price),
+                            pos: r.position.into(),
+                        });
                         continue;
                     }
                 }

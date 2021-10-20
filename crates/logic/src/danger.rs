@@ -31,7 +31,7 @@ pub fn SpawnDangerZone(mut commands: Commands, q: Query<(Entity, &SpawnDangerZon
                 fill_options: FillOptions::default(),
                 outline_options: StrokeOptions::default().with_line_width(3.0),
             },
-            Transform::from_xyz(s.position.x, s.position.y, 0.0),
+            Transform::from_xyz(s.position.x, s.position.y, 10.0),
         );
         commands
             .spawn()
