@@ -32,6 +32,7 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
           override: true
+      - uses: jetli/wasm-pack-action@v0.3.0
       - run: cargo install cargo-make
       - run: cd crates/logic && cargo make web
 
