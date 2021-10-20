@@ -34,7 +34,7 @@ jobs:
           override: true
       - uses: jetli/wasm-pack-action@v0.3.0
       - run: cargo install --force cargo-make
-      - run: cd crates/logic && cargo make web
+      - run: cd crates/logic && cargo make web && cd - && rm ./crates/web/public/pkg/.gitignore
       - uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
