@@ -1,7 +1,7 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, render::pipeline::RenderPipeline};
 use bevy_prototype_lyon::{prelude::*, shapes::Circle};
 
-use crate::{map_graph::PlayerPositionDisplay, AppState};
+use crate::{map_graph::PlayerPositionDisplay, shapes::ShapeMeshes, AppState};
 
 pub struct DangerZone {
     pub size: f32,
@@ -19,23 +19,23 @@ pub struct SpawnDangerZoneCommand {
     pub radius_increase_per_second: f32,
 }
 
-pub fn SpawnDangerZone(mut commands: Commands, q: Query<(Entity, &SpawnDangerZoneCommand)>) {
+pub fn SpawnDangerZone(
+    mut commands: Commands,
+    shapes: Res<ShapeMeshes>,
+    q: Query<(Entity, &SpawnDangerZoneCommand)>,
+) {
     for (e, s) in q.iter() {
-        let circle = GeometryBuilder::build_as(
-            &Circle {
-                radius: 10f32,
-                center: Vec2::ZERO,
-            },
-            ShapeColors::outlined(Color::NONE, Color::RED),
-            DrawMode::Outlined {
-                fill_options: FillOptions::default(),
-                outline_options: StrokeOptions::default().with_line_width(3.0),
-            },
-            Transform::from_xyz(s.position.x, s.position.y, 10.0),
-        );
+        let mesh = MeshBundle {
+            mesh: shapes.circle.clone(),
+            render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
+                shapes.pipeline_circle.clone(),
+            )]),
+            transform: Transform::from_xyz(s.position.x, s.position.y, 10.0),
+            ..Default::default()
+        };
         commands
             .spawn()
-            .insert_bundle(circle)
+            .insert_bundle(mesh)
             .insert(DangerZone { size: 1f32 })
             .insert(GrowDangerZone {
                 radius_increase_per_second: s.radius_increase_per_second,
@@ -80,31 +80,8 @@ pub fn grow_danger_zone(
     }
 }
 
-pub fn update_danger_visual(
-    time: Res<Time>,
-    mut timer: Local<f32>,
-    mut commands: Commands,
-    q: Query<(Entity, &Transform, &DangerZone)>,
-) {
-    *timer += time.delta_seconds();
-    if *timer < 0.1f32 {
-        return;
-    }
-    *timer = 0f32;
-    for (e, t, d) in q.iter() {
-        let color = *Color::RED.set_r(0.7f32);
-        let circle = GeometryBuilder::build_as(
-            &Circle {
-                radius: d.size,
-                center: Vec2::ZERO,
-            },
-            ShapeColors::outlined(color, color),
-            DrawMode::Outlined {
-                fill_options: FillOptions::default(),
-                outline_options: StrokeOptions::default().with_line_width(2.0),
-            },
-            Transform::from_translation(t.translation),
-        );
-        commands.entity(e).insert_bundle(circle);
+pub fn update_danger_visual(mut q: Query<(Entity, &mut Transform, &DangerZone)>) {
+    for (e, mut t, d) in q.iter_mut() {
+        t.scale = Vec3::ONE * d.size;
     }
 }

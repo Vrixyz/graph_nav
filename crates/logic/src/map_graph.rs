@@ -3,6 +3,7 @@ use crate::danger::{
 };
 use crate::delayed_destroy::destroy_after;
 use crate::graphics_rooms::{create_room, RoomGraphic};
+use crate::shapes::ShapesPlugin;
 use crate::text_feedback::{show_text_feedback, spawn_text_feedback, TextFeedbackSpawn};
 use crate::AppState;
 use crate::{
@@ -79,7 +80,7 @@ pub struct PermanentEntity;
 
 impl Plugin for MapGraphPlugin {
     fn build(&self, app: &mut AppBuilder) {
-        app.add_plugin(ShapePlugin);
+        app.add_plugin(ShapesPlugin);
         let loading_startup_system_set =
             SystemSet::on_enter(AppState::Loading).with_system(create_map.system());
         app.add_system_set(loading_startup_system_set);
@@ -210,9 +211,10 @@ fn create_map(mut commands: Commands) {
     commands.insert_resource(new_map);
     commands.insert_resource(MapPosition { pos_id: RoomId(0) });
     // Spawn a first danger zone
+
     commands.spawn().insert(SpawnDangerZoneCommand {
-        position: [15f32, 15f32].into(),
-        radius_increase_per_second: 15f32,
+        position: [20f32, 20f32].into(),
+        radius_increase_per_second: 10f32,
     });
 }
 

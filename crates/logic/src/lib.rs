@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContext, EguiPlugin};
+use bevy_prototype_lyon::plugin::ShapePlugin;
 use map_graph::{Coins, MapGraphPlugin};
 use wasm_bindgen::prelude::*;
 
@@ -9,8 +10,8 @@ pub mod graphics_rooms;
 pub mod map_graph;
 pub mod math_utils;
 mod poisson;
+pub mod shapes;
 pub mod text_feedback;
-use graphics_rooms::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AppState {
@@ -24,6 +25,7 @@ pub struct GamePlugin;
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut AppBuilder) {
         app.add_plugins(DefaultPlugins);
+        app.add_plugin(ShapePlugin);
 
         #[cfg(target_arch = "wasm32")]
         app.add_plugin(bevy_webgl2::WebGL2Plugin);
