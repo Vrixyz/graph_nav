@@ -26,8 +26,14 @@ pub fn init_shapes(
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let pipeline_handle = pipelines.add(PipelineDescriptor::default_config(ShaderStages {
-        vertex: shaders.add(Shader::from_glsl(ShaderStage::Vertex, VERTEX_SHADER)),
-        fragment: Some(shaders.add(Shader::from_glsl(ShaderStage::Fragment, FRAGMENT_CIRCLE))),
+        vertex: shaders.add(Shader::from_glsl(
+            ShaderStage::Vertex,
+            include_str!("shaders/shape.es.vert"),
+        )),
+        fragment: Some(shaders.add(Shader::from_glsl(
+            ShaderStage::Fragment,
+            include_str!("shaders/circle.es.frag"),
+        ))),
     }));
     let m = meshes.add(Mesh::from(shape::Quad {
         size: Vec2::new(2f32, 2f32),
@@ -39,6 +45,11 @@ pub fn init_shapes(
     })
 }
 
+// TODO: convert to version 300 es
+// lyon es version:
+// https://github.com/Nilirad/bevy_prototype_lyon/blob/a6f65791b2eea1c6f10257a0f8c541a5c5a87914/src/render/shape.es.frag
+// maybe take example of Lyon, they use a different shader if targetting wasm
+// https://github.com/Nilirad/bevy_prototype_lyon/blob/79cdb49888bda1455cf1ed5fee6aa3d5a955385f/src/render/mod.rs
 const VERTEX_SHADER: &str = r#"
 #version 450
 layout(location = 2) in vec2 Vertex_Uv;
