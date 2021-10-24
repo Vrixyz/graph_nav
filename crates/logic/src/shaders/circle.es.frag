@@ -1,7 +1,6 @@
 #version 300 es
 precision lowp float;
 
-// Use this instead of gl_FragColor?
 out vec4 o_Target;
 in vec2 v_Uv;
 

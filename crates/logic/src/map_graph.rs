@@ -3,7 +3,7 @@ use crate::danger::{
 };
 use crate::delayed_destroy::destroy_after;
 use crate::graphics_rooms::{create_room, RoomGraphic};
-use crate::shapes::ShapesPlugin;
+use crate::shapes::{ShapeMeshes, ShapesPlugin};
 use crate::text_feedback::{show_text_feedback, spawn_text_feedback, TextFeedbackSpawn};
 use crate::AppState;
 use crate::{
@@ -156,7 +156,7 @@ fn loading_update(mut state: ResMut<State<AppState>>) {
 
 fn create_map(mut commands: Commands) {
     let mut cameraBundle = OrthographicCameraBundle::new_2d();
-    cameraBundle.orthographic_projection.scale = 0.3;
+    cameraBundle.orthographic_projection.scale = 0.9;
     commands.spawn_bundle(cameraBundle).insert(MainCamera);
     commands.insert_resource(Coins { amount: 0u32 });
     commands.insert_resource(DangerSpeedModifier { multiplier: 1f32 });
@@ -218,7 +218,7 @@ fn create_map(mut commands: Commands) {
     });
 }
 
-fn init_display_map(mut commands: Commands, map: Res<MapDef>) {
+fn init_display_map(mut commands: Commands, shapes: Res<ShapeMeshes>, map: Res<MapDef>) {
     if map.rooms.is_empty() {
         return;
     }
@@ -226,7 +226,7 @@ fn init_display_map(mut commands: Commands, map: Res<MapDef>) {
     let mut visit_index = RoomId(0);
     while visit_index.0 < visit_queue.len() {
         let room = &map.rooms[visit_queue[visit_index.0]];
-        create_room(&mut commands, room, visit_index, true);
+        create_room(&shapes, &mut commands, room, visit_index, true);
         for connection in &room.connections {
             create_link(&mut commands, &map.rooms[connection], room);
             if !visit_queue.contains(&connection) {
@@ -281,6 +281,7 @@ fn base_input(
 
 fn update_map_reachabiliy(
     mut commands: Commands,
+    shapes: Res<ShapeMeshes>,
     time: Res<Time>,
     mut timer: Local<f32>,
     map: Res<MapDef>,
@@ -296,10 +297,12 @@ fn update_map_reachabiliy(
     for (e, r, mut g) in rooms.iter_mut() {
         let room_to_update = &map.rooms[r];
         let is_reachable = current_room.connections.contains(r);
-        if let Some(update_components) = g.updateReachability(is_reachable, room_to_update) {
+        if let Some(update_components) = g.updateReachability(&shapes, is_reachable, room_to_update)
+        {
             commands
                 .entity(e)
-                .insert_bundle(update_components.0)
+                .insert_bundle(update_components.0.mesh_bundle)
+                .insert(update_components.0.material)
                 .insert(update_components.1);
         }
     }
@@ -418,6 +421,7 @@ fn handle_input(
 
 fn create_new_rooms(
     mut commands: Commands,
+    shapes: Res<ShapeMeshes>,
     mut map: ResMut<MapDef>,
     q_create: Query<(Entity, &MapCreateRoom)>,
 ) {
@@ -448,7 +452,7 @@ fn create_new_rooms(
                     position: new_position,
                     room_type: create.room_type.clone(),
                 };
-                create_room(&mut commands, &new_room, room_id_to_create, true);
+                create_room(&shapes, &mut commands, &new_room, room_id_to_create, true);
                 create_link(
                     &mut commands,
                     map.rooms.get(&create.from_room_id).unwrap(),

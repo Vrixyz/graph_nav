@@ -26,11 +26,11 @@ pub fn SpawnDangerZone(
 ) {
     for (e, s) in q.iter() {
         let mesh = MeshBundle {
-            mesh: shapes.circle.clone(),
+            mesh: shapes.quad2x2.clone(),
             render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
                 shapes.pipeline_circle.clone(),
             )]),
-            transform: Transform::from_xyz(s.position.x, s.position.y, 10.0),
+            transform: Transform::from_xyz(s.position.x, s.position.y, 15.0),
             ..Default::default()
         };
         commands
