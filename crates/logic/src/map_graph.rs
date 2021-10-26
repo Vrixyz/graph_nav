@@ -156,7 +156,7 @@ fn loading_update(mut state: ResMut<State<AppState>>) {
 
 fn create_map(mut commands: Commands) {
     let mut cameraBundle = OrthographicCameraBundle::new_2d();
-    cameraBundle.orthographic_projection.scale = 0.9;
+    cameraBundle.orthographic_projection.scale = 0.3;
     commands.spawn_bundle(cameraBundle).insert(MainCamera);
     commands.insert_resource(Coins { amount: 0u32 });
     commands.insert_resource(DangerSpeedModifier { multiplier: 1f32 });
