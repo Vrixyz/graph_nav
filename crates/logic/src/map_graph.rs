@@ -76,6 +76,17 @@ pub struct Coins {
     pub amount: u32,
 }
 
+pub struct Cooldown {
+    last_action_time: f32,
+    base_cooldown: f32,
+}
+
+impl Cooldown {
+    pub fn is_ready(&self, time: &Time) -> bool {
+        self.last_action_time + self.base_cooldown <= time.seconds_since_startup() as f32
+    }
+}
+
 pub struct PermanentEntity;
 
 impl Plugin for MapGraphPlugin {
@@ -154,7 +165,7 @@ fn loading_update(mut state: ResMut<State<AppState>>) {
     state.set(AppState::Game);
 }
 
-fn create_map(mut commands: Commands) {
+fn create_map(mut commands: Commands, time: Res<Time>) {
     let mut cameraBundle = OrthographicCameraBundle::new_2d();
     cameraBundle.orthographic_projection.scale = 0.3;
     commands.spawn_bundle(cameraBundle).insert(MainCamera);
@@ -211,10 +222,14 @@ fn create_map(mut commands: Commands) {
     commands.insert_resource(new_map);
     commands.insert_resource(MapPosition { pos_id: RoomId(0) });
     // Spawn a first danger zone
-
+    ///*
     commands.spawn().insert(SpawnDangerZoneCommand {
         position: [20f32, 20f32].into(),
-        radius_increase_per_second: 10f32,
+        radius_increase_per_second: 3.5f32,
+    }); //*/
+    commands.spawn().insert(Cooldown {
+        last_action_time: time.seconds_since_startup() as f32,
+        base_cooldown: 1.5f32,
     });
 }
 
@@ -358,7 +373,7 @@ fn react_to_move_player(
             RoomType::Danger => {
                 commands.spawn().insert(SpawnDangerZoneCommand {
                     position: direction_for_danger + current_position,
-                    radius_increase_per_second: 10f32,
+                    radius_increase_per_second: 3.5f32,
                 });
             }
             RoomType::Coins => {
@@ -381,13 +396,27 @@ fn react_to_move_player(
 fn handle_input(
     mut commands: Commands,
     map: Res<MapDef>,
+    time: Res<Time>,
     coins: Res<Coins>,
     mut inputs: ResMut<UserInputs>,
     mut position: ResMut<MapPosition>,
+    mut q_cooldown: Query<(&mut Cooldown)>,
 ) {
     let current_room = map.rooms.get(&position.pos_id).unwrap();
+    let mut cooldown = match q_cooldown.iter_mut().last() {
+        Some(c) => c,
+        None => return,
+    };
     for click in inputs.list.iter() {
         let UserInput::Click(click) = click;
+        // TODO: check for cooldown
+        if !cooldown.is_ready(&time) {
+            commands.spawn().insert(TextFeedbackSpawn {
+                text: format!("Not Ready\n"),
+                pos: Vec2::new(0f32, 0f32),
+            });
+            break;
+        }
         for id in map.rooms.keys() {
             if !current_room.connections.contains(id) {
                 continue;
@@ -412,6 +441,7 @@ fn handle_input(
             let distance_to_room = room_position.distance(*click);
             if distance_to_room < 15.0 {
                 position.pos_id = *id;
+                cooldown.last_action_time = time.seconds_since_startup() as f32;
                 break;
             }
         }

@@ -37,12 +37,15 @@ impl Plugin for ShapesPlugin {
 
 pub fn init_shapes(
     mut commands: Commands,
+    asset_server: ResMut<AssetServer>,
     mut render_graph: ResMut<RenderGraph>,
     mut pipelines: ResMut<Assets<PipelineDescriptor>>,
     mut shaders: ResMut<Assets<Shader>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
+    // Watch for changes
+    asset_server.watch_for_changes().unwrap();
     // Add an AssetRenderResourcesNode to our Render Graph. This will bind MyMaterial resources to
     // our shader
     render_graph.add_system_node(
@@ -53,28 +56,38 @@ pub fn init_shapes(
         .add_node_edge("color_material", base::node::MAIN_PASS)
         .unwrap();
     #[cfg(target_arch = "wasm32")]
-    let vert = include_str!("shaders/shape.es.vert");
+    let vert = shaders.add(Shader::from_glsl(
+        ShaderStage::Vertex,
+        include_str!("../assets/shaders/shape.es.vert"),
+    ));
     #[cfg(not(target_arch = "wasm32"))]
-    let vert = include_str!("shaders/shape.vert");
+    let vert = asset_server.load::<Shader, _>("../../logic/assets/shaders/shape.vert");
 
     #[cfg(target_arch = "wasm32")]
-    let circle_frag = include_str!("shaders/circle.es.frag");
+    let circle_frag = shaders.add(Shader::from_glsl(
+        ShaderStage::Fragment,
+        include_str!("../assets/shaders/circle.es.frag"),
+    ));
     #[cfg(not(target_arch = "wasm32"))]
-    let circle_frag = include_str!("shaders/circle.frag");
+    let circle_frag = asset_server.load::<Shader, _>("../../logic/assets/shaders/circle.frag");
 
     #[cfg(target_arch = "wasm32")]
-    let triangle_frag = include_str!("shaders/triangle.es.frag");
+    let triangle_frag = shaders.add(Shader::from_glsl(
+        ShaderStage::Fragment,
+        include_str!("../assets/shaders/circle.es.frag"),
+    ));
     #[cfg(not(target_arch = "wasm32"))]
-    let triangle_frag = include_str!("shaders/triangle.frag");
+    let triangle_frag = asset_server.load::<Shader, _>("../../logic/assets/shaders/triangle.frag");
 
     let pipeline_circle_handle = pipelines.add(PipelineDescriptor::default_config(ShaderStages {
-        vertex: shaders.add(Shader::from_glsl(ShaderStage::Vertex, vert)),
-        fragment: Some(shaders.add(Shader::from_glsl(ShaderStage::Fragment, circle_frag))),
+        vertex: vert.clone(),
+        fragment: Some(circle_frag),
     }));
+
     let pipeline_triangle_handle =
         pipelines.add(PipelineDescriptor::default_config(ShaderStages {
-            vertex: shaders.add(Shader::from_glsl(ShaderStage::Vertex, vert)),
-            fragment: Some(shaders.add(Shader::from_glsl(ShaderStage::Fragment, triangle_frag))),
+            vertex: vert,
+            fragment: Some(triangle_frag),
         }));
     let m = meshes.add(Mesh::from(shape::Quad {
         size: Vec2::new(2f32, 2f32),
