@@ -74,7 +74,7 @@ pub fn init_shapes(
     #[cfg(target_arch = "wasm32")]
     let triangle_frag = shaders.add(Shader::from_glsl(
         ShaderStage::Fragment,
-        include_str!("../assets/shaders/circle.es.frag"),
+        include_str!("../assets/shaders/triangle.es.frag"),
     ));
     #[cfg(not(target_arch = "wasm32"))]
     let triangle_frag = asset_server.load::<Shader, _>("../../logic/assets/shaders/triangle.frag");
