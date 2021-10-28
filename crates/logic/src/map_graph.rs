@@ -225,11 +225,11 @@ fn create_map(mut commands: Commands, time: Res<Time>) {
     ///*
     commands.spawn().insert(SpawnDangerZoneCommand {
         position: [20f32, 20f32].into(),
-        radius_increase_per_second: 3.5f32,
+        radius_increase_per_second: 10f32,
     }); //*/
     commands.spawn().insert(Cooldown {
         last_action_time: time.seconds_since_startup() as f32,
-        base_cooldown: 1.5f32,
+        base_cooldown: 0.1f32,
     });
 }
 
@@ -373,7 +373,7 @@ fn react_to_move_player(
             RoomType::Danger => {
                 commands.spawn().insert(SpawnDangerZoneCommand {
                     position: direction_for_danger + current_position,
-                    radius_increase_per_second: 3.5f32,
+                    radius_increase_per_second: 10f32,
                 });
             }
             RoomType::Coins => {
