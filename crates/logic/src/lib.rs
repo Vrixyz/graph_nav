@@ -4,6 +4,7 @@ use bevy_prototype_lyon::plugin::ShapePlugin;
 use map_graph::{Coins, MapGraphPlugin};
 use wasm_bindgen::prelude::*;
 
+pub mod combat;
 pub mod danger;
 pub mod delayed_destroy;
 pub mod graphics_rooms;

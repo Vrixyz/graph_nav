@@ -84,9 +84,9 @@ pub fn create_room(
     room: &Room,
     id: RoomId,
     is_reachable: bool,
-) {
+) -> Entity {
     let mut map_graphics = RoomGraphic { is_reachable: true };
-    let mut spawning = commands.spawn();
+    let mut spawning = commands.entity(room.entity);
     spawning.insert(id);
     spawning.insert(is_reachable);
     let for_init = map_graphics.init(shapes, is_reachable, room);
@@ -95,4 +95,5 @@ pub fn create_room(
         .insert(for_init.0.material)
         .insert(for_init.1);
     spawning.insert(map_graphics);
+    return spawning.id();
 }

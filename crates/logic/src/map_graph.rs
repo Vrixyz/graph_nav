@@ -1,3 +1,4 @@
+use crate::combat::CombatPlugin;
 use crate::danger::{
     danger_zone_grow_speedup, DangerSpeedModifier, SpawnDangerZone, SpawnDangerZoneCommand,
 };
@@ -26,11 +27,15 @@ pub struct RoomId(usize);
 
 pub struct DisplayRoomReachable;
 
-#[derive(Default)]
 pub struct Room {
     pub connections: Vec<RoomId>,
     pub position: (f32, f32),
     pub room_type: RoomType,
+    pub entity: Entity,
+}
+pub struct RoomEntity {
+    // TODO: this probably be the transform actually, and remove position from Room..
+    pub position: (f32, f32),
 }
 
 #[derive(Default)]
@@ -59,6 +64,7 @@ pub struct MapCreateRoom {
 
 pub struct MapPosition {
     pub pos_id: RoomId,
+    pub will_move: Option<RoomId>,
 }
 pub struct PlayerPositionDisplay;
 
@@ -104,6 +110,7 @@ pub struct PermanentEntity;
 impl Plugin for MapGraphPlugin {
     fn build(&self, app: &mut AppBuilder) {
         app.add_plugin(ShapesPlugin);
+        app.add_plugin(CombatPlugin);
         let loading_startup_system_set =
             SystemSet::on_enter(AppState::Loading).with_system(create_map.system());
         app.add_system_set(loading_startup_system_set);
@@ -129,6 +136,7 @@ impl Plugin for MapGraphPlugin {
             .with_system(grow_danger_zone.system())
             .with_system(update_danger_visual.system())
             .with_system(update_map_reachabiliy.system())
+            .with_system(react_to_will_move.system())
             .with_system(react_to_move_player.system())
             .with_system(update_camera_position.system())
             .with_system(danger_zone_grow_speedup.system())
@@ -197,6 +205,12 @@ fn create_map(mut commands: Commands, time: Res<Time>) {
                 connections: Default::default(),
                 position: positions[i],
                 room_type: RoomType::Safe,
+                entity: commands
+                    .spawn()
+                    .insert(RoomEntity {
+                        position: positions[i],
+                    })
+                    .id(),
             },
         );
     }
@@ -211,17 +225,23 @@ fn create_map(mut commands: Commands, time: Res<Time>) {
             poisson.compute_new_position(&positions, &ref_point, 40f32, 5, &mut rng)
         {
             {
-                new_map
-                    .rooms
-                    .entry(root_index)
-                    .or_default()
-                    .connections
-                    .push(room_id_to_create);
+                match new_map.rooms.entry(root_index) {
+                    std::collections::hash_map::Entry::Occupied(mut room) => {
+                        room.get_mut().connections.push(room_id_to_create);
+                    }
+                    std::collections::hash_map::Entry::Vacant(_) => return,
+                };
             }
             let new_room = Room {
                 connections: vec![root_index],
                 position: new_position,
                 room_type: RoomType::Safe,
+                entity: commands
+                    .spawn()
+                    .insert(RoomEntity {
+                        position: new_position,
+                    })
+                    .id(),
             };
             {
                 new_map.rooms.insert(room_id_to_create, new_room);
@@ -233,7 +253,10 @@ fn create_map(mut commands: Commands, time: Res<Time>) {
         }
     }
     commands.insert_resource(new_map);
-    commands.insert_resource(MapPosition { pos_id: RoomId(0) });
+    commands.insert_resource(MapPosition {
+        pos_id: RoomId(0),
+        will_move: None,
+    });
     // Spawn a first danger zone
     // /*
     commands.spawn().insert(SpawnDangerZoneCommand {
@@ -337,6 +360,17 @@ fn update_map_reachabiliy(
     }
 }
 
+fn react_to_will_move(mut position_changed: ResMut<MapPosition>) {
+    if !position_changed.is_changed() {
+        return;
+    }
+    if position_changed.will_move.is_none() {
+        return;
+    }
+    position_changed.pos_id = position_changed.will_move.unwrap();
+    position_changed.will_move = None;
+}
+
 fn react_to_move_player(
     mut commands: Commands,
     mut coins: ResMut<Coins>,
@@ -345,6 +379,9 @@ fn react_to_move_player(
     position_changed: Res<MapPosition>,
 ) {
     if !position_changed.is_changed() {
+        return;
+    }
+    if position_changed.will_move.is_some() {
         return;
     }
     commands.spawn().insert(MapCreateRoom {
@@ -442,7 +479,6 @@ fn handle_input(
     };
     for click in inputs.list.iter() {
         let UserInput::Click(click) = click;
-        // TODO: check for cooldown
         if !cooldown.is_ready(&time) {
             commands.spawn().insert(TextFeedbackSpawn {
                 text: format!("Not Ready\n"),
@@ -473,7 +509,7 @@ fn handle_input(
             let room_position = Vec2::new(r.position.0, r.position.1);
             let distance_to_room = room_position.distance(*click);
             if distance_to_room < 15.0 {
-                position.pos_id = *id;
+                position.will_move = Some(*id);
                 cooldown.last_action_time = time.seconds_since_startup() as f32;
                 break;
             }
@@ -504,15 +540,17 @@ fn create_new_rooms(
                 &mut rng,
             ) {
                 {
-                    map.rooms
-                        .entry(create.from_room_id)
-                        .or_default()
-                        .connections
-                        .push(room_id_to_create);
+                    match map.rooms.entry(create.from_room_id) {
+                        std::collections::hash_map::Entry::Occupied(mut room) => {
+                            room.get_mut().connections.push(room_id_to_create);
+                        }
+                        std::collections::hash_map::Entry::Vacant(_) => return,
+                    };
                 }
                 let mut new_room = Room {
                     connections: vec![create.from_room_id],
                     position: new_position,
+                    entity: commands.spawn().id(),
                     room_type: create.room_type.clone(),
                 };
                 create_room(&shapes, &mut commands, &new_room, room_id_to_create, true);
