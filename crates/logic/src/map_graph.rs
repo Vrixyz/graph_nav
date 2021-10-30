@@ -279,8 +279,7 @@ fn init_display_map(mut commands: Commands, shapes: Res<ShapeMeshes>, map: Res<M
     commands
         .spawn_bundle(character)
         .insert(PlayerPositionDisplay)
-        .insert(shapes.mat_circle_gauge.clone())
-        .insert(shapes.mat_white.clone());
+        .insert(shapes.mat_circle_gauge.clone());
 }
 
 fn base_input(

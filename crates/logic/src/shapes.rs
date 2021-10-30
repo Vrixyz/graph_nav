@@ -111,6 +111,13 @@ pub fn init_shapes(
     #[cfg(not(target_arch = "wasm32"))]
     let circle_gauge_frag =
         asset_server.load::<Shader, _>("../../logic/assets/shaders/circle_gauge.frag");
+    #[cfg(target_arch = "wasm32")]
+    let circle_gauge_frag = shaders.add(Shader::from_glsl(
+        ShaderStage::Fragment,
+        include_str!("../assets/shaders/circle_gauge.es.frag"),
+    ));
+    // For dynamic, copy ../../logic/assets into web/public and use that code
+    // let circle_gauge_frag = asset_server.load::<Shader, _>("shaders/circle_gauge.es.frag");
 
     let pipeline_circle_gauge_handle =
         pipelines.add(PipelineDescriptor::default_config(ShaderStages {
