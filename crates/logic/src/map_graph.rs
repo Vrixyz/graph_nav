@@ -3,7 +3,7 @@ use crate::danger::{
 };
 use crate::delayed_destroy::destroy_after;
 use crate::graphics_rooms::{create_room, RoomGraphic};
-use crate::shapes::{ShapeMeshes, ShapesPlugin};
+use crate::shapes::{CircleGaugeMaterial, ColorMaterial, ShapeMeshes, ShapesPlugin};
 use crate::text_feedback::{show_text_feedback, spawn_text_feedback, TextFeedbackSpawn};
 use crate::AppState;
 use crate::{
@@ -12,6 +12,7 @@ use crate::{
     poisson::Poisson,
 };
 use bevy::render::camera;
+use bevy::render::pipeline::RenderPipeline;
 use bevy::{prelude::*, render::camera::OrthographicProjection, utils::HashMap};
 use bevy_prototype_lyon::{
     prelude::*,
@@ -85,6 +86,17 @@ impl Cooldown {
     pub fn is_ready(&self, time: &Time) -> bool {
         self.last_action_time + self.base_cooldown <= time.seconds_since_startup() as f32
     }
+
+    pub fn get_ratio(&self, time: &Time) -> f32 {
+        if self.is_ready(time) {
+            return dbg!(1f32);
+        }
+        let total_time = self.base_cooldown;
+        let time_left =
+            (self.last_action_time + self.base_cooldown) - time.seconds_since_startup() as f32;
+        let ratio = time_left / total_time;
+        dbg!(1f32 - ratio)
+    }
 }
 
 pub struct PermanentEntity;
@@ -122,6 +134,7 @@ impl Plugin for MapGraphPlugin {
             .with_system(danger_zone_grow_speedup.system())
             .with_system(spawn_text_feedback.system())
             .with_system(destroy_after.system())
+            .with_system(cooldown_material_update.system())
             .with_system(show_text_feedback.system());
         app.add_system_set(game_update_system_set);
 
@@ -222,14 +235,14 @@ fn create_map(mut commands: Commands, time: Res<Time>) {
     commands.insert_resource(new_map);
     commands.insert_resource(MapPosition { pos_id: RoomId(0) });
     // Spawn a first danger zone
-    ///*
+    // /*
     commands.spawn().insert(SpawnDangerZoneCommand {
         position: [20f32, 20f32].into(),
         radius_increase_per_second: 10f32,
-    }); //*/
+    }); // */
     commands.spawn().insert(Cooldown {
         last_action_time: time.seconds_since_startup() as f32,
-        base_cooldown: 0.1f32,
+        base_cooldown: 0.5f32,
     });
 }
 
@@ -251,21 +264,23 @@ fn init_display_map(mut commands: Commands, shapes: Res<ShapeMeshes>, map: Res<M
         visit_index.0 += 1;
     }
     let first_room = &map.rooms[&RoomId(0)];
-    let character = GeometryBuilder::build_as(
-        &Circle {
-            radius: 18.0,
-            center: Default::default(),
-        },
-        ShapeColors::outlined(Color::NONE, Color::WHITE),
-        DrawMode::Outlined {
-            fill_options: FillOptions::default(),
-            outline_options: StrokeOptions::default().with_line_width(3.0),
-        },
-        Transform::from_xyz(first_room.position.0, first_room.position.1, 0.0),
-    );
+    let mut charac_transform =
+        Transform::from_xyz(first_room.position.0, first_room.position.1, 0.0);
+    charac_transform.scale = Vec3::ONE * 22.0;
+
+    let character = MeshBundle {
+        mesh: shapes.quad2x2.clone(),
+        render_pipelines: RenderPipelines::from_pipelines(vec![RenderPipeline::new(
+            shapes.pipeline_circle_gauge.clone(),
+        )]),
+        transform: charac_transform,
+        ..Default::default()
+    };
     commands
         .spawn_bundle(character)
-        .insert(PlayerPositionDisplay);
+        .insert(PlayerPositionDisplay)
+        .insert(shapes.mat_circle_gauge.clone())
+        .insert(shapes.mat_white.clone());
 }
 
 fn base_input(
@@ -373,7 +388,7 @@ fn react_to_move_player(
             RoomType::Danger => {
                 commands.spawn().insert(SpawnDangerZoneCommand {
                     position: direction_for_danger + current_position,
-                    radius_increase_per_second: 10f32,
+                    radius_increase_per_second: 9.5f32,
                 });
             }
             RoomType::Coins => {
@@ -389,6 +404,25 @@ fn react_to_move_player(
             if let Some(r) = map.rooms.get_mut(&position_changed.pos_id) {
                 r.room_type = RoomType::Safe;
             }
+        }
+    }
+}
+fn cooldown_material_update(
+    time: Res<Time>,
+    shapes: ResMut<ShapeMeshes>,
+    mut materials_circle_gauge: ResMut<Assets<CircleGaugeMaterial>>,
+    q_cooldown: Query<(&Cooldown)>,
+) {
+    let cooldown = match q_cooldown.iter().last() {
+        Some(c) => c,
+        None => return,
+    };
+    if let Some(mat) = materials_circle_gauge.get_mut(shapes.mat_circle_gauge.clone()) {
+        mat.ratio = cooldown.get_ratio(&time);
+        if mat.ratio >= 1.0f32 {
+            mat.color = Color::WHITE
+        } else {
+            mat.color = Color::GRAY;
         }
     }
 }
