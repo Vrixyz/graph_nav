@@ -1,4 +1,4 @@
-use crate::combat::CombatPlugin;
+use crate::combat::{Battle, CombatPlugin, IsDirty};
 use crate::danger::{
     danger_zone_grow_speedup, DangerSpeedModifier, SpawnDangerZone, SpawnDangerZoneCommand,
 };
@@ -19,6 +19,7 @@ use bevy_prototype_lyon::{
     prelude::*,
     shapes::{Circle, Line, RegularPolygon, RegularPolygonFeature},
 };
+use rand::RngCore;
 
 pub struct MapGraphPlugin;
 
@@ -60,6 +61,7 @@ impl Default for RoomType {
 pub struct MapCreateRoom {
     from_room_id: RoomId,
     room_type: RoomType,
+    battle: Option<Battle>,
 }
 
 pub struct MapPosition {
@@ -95,13 +97,13 @@ impl Cooldown {
 
     pub fn get_ratio(&self, time: &Time) -> f32 {
         if self.is_ready(time) {
-            return dbg!(1f32);
+            return 1f32;
         }
         let total_time = self.base_cooldown;
         let time_left =
             (self.last_action_time + self.base_cooldown) - time.seconds_since_startup() as f32;
         let ratio = time_left / total_time;
-        dbg!(1f32 - ratio)
+        1f32 - ratio
     }
 }
 
@@ -136,7 +138,6 @@ impl Plugin for MapGraphPlugin {
             .with_system(grow_danger_zone.system())
             .with_system(update_danger_visual.system())
             .with_system(update_map_reachabiliy.system())
-            .with_system(react_to_will_move.system())
             .with_system(react_to_move_player.system())
             .with_system(update_camera_position.system())
             .with_system(danger_zone_grow_speedup.system())
@@ -384,21 +385,41 @@ fn react_to_move_player(
     if position_changed.will_move.is_some() {
         return;
     }
+
+    let mut rng = rand::thread_rng();
     commands.spawn().insert(MapCreateRoom {
         from_room_id: position_changed.pos_id,
         room_type: RoomType::Safe,
+        battle: if rng.next_u32() % 5 == 0 {
+            Some(Battle {
+                hp: 1.0,
+                attack: 1.0,
+            })
+        } else {
+            None
+        },
     });
     commands.spawn().insert(MapCreateRoom {
         from_room_id: position_changed.pos_id,
         room_type: RoomType::Danger,
+        battle: None,
     });
     commands.spawn().insert(MapCreateRoom {
         from_room_id: position_changed.pos_id,
         room_type: RoomType::Coins,
+        battle: if rng.next_u32() % 3 == 0 {
+            Some(Battle {
+                hp: 1.0,
+                attack: 1.0,
+            })
+        } else {
+            None
+        },
     });
     commands.spawn().insert(MapCreateRoom {
         from_room_id: position_changed.pos_id,
         room_type: RoomType::Price(7),
+        battle: None,
     });
 
     if let Some(r) = map.rooms.get(&position_changed.pos_id) {
@@ -550,9 +571,20 @@ fn create_new_rooms(
                 let mut new_room = Room {
                     connections: vec![create.from_room_id],
                     position: new_position,
-                    entity: commands.spawn().id(),
+                    entity: commands
+                        .spawn()
+                        .insert(RoomEntity {
+                            position: new_position,
+                        })
+                        .id(),
                     room_type: create.room_type.clone(),
                 };
+                if let Some(battle) = &create.battle {
+                    commands
+                        .entity(new_room.entity)
+                        .insert(battle.clone())
+                        .insert(IsDirty);
+                }
                 create_room(&shapes, &mut commands, &new_room, room_id_to_create, true);
                 create_link(
                     &mut commands,

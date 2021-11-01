@@ -4,7 +4,7 @@ use bevy::{ecs::system::EntityCommands, prelude::*, render::pipeline::RenderPipe
 use bevy_prototype_lyon::{entity::ShapeBundle, prelude::*, shapes::RegularPolygon};
 
 use crate::{
-    map_graph::{DisplayRoomReachable, Room, RoomId},
+    map_graph::{DisplayRoomReachable, Room, RoomEntity, RoomId},
     shapes::ShapeMeshes,
 };
 
