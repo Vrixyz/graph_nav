@@ -1,7 +1,11 @@
 use bevy::{prelude::*, render::pipeline::RenderPipeline};
 use bevy_prototype_lyon::{prelude::*, shapes::Circle};
 
-use crate::{map_graph::PlayerPositionDisplay, shapes::ShapeMeshes, AppState};
+use crate::{
+    map_graph::{MapConfiguration, PlayerPositionDisplay},
+    shapes::ShapeMeshes,
+    AppState,
+};
 
 pub struct DangerZone {
     pub size: f32,
@@ -63,9 +67,10 @@ pub fn check_player_death(
 
 pub fn danger_zone_grow_speedup(
     time: Res<Time>,
+    map_configuration: Res<MapConfiguration>,
     mut danger_speed_modifier: ResMut<DangerSpeedModifier>,
 ) {
-    danger_speed_modifier.multiplier += time.delta_seconds() * 0.1f32;
+    danger_speed_modifier.multiplier += time.delta_seconds() * map_configuration.speed_gain_danger;
 }
 
 pub fn grow_danger_zone(

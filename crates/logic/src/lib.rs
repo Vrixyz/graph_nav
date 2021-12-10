@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContext, EguiPlugin};
 use bevy_prototype_lyon::plugin::ShapePlugin;
-use map_graph::{Coins, MapGraphPlugin};
+use map_graph::{Coins, MapConfiguration, MapGraphPlugin};
 use wasm_bindgen::prelude::*;
 
 pub mod combat;
@@ -39,7 +39,11 @@ impl Plugin for GamePlugin {
     }
 }
 
-fn ui_menu(mut state: ResMut<State<AppState>>, egui_context: ResMut<EguiContext>) {
+fn ui_menu(
+    mut state: ResMut<State<AppState>>,
+    mut map_configuration: ResMut<MapConfiguration>,
+    egui_context: ResMut<EguiContext>,
+) {
     if state.current() != &AppState::Menu {
         return;
     }
@@ -47,10 +51,33 @@ fn ui_menu(mut state: ResMut<State<AppState>>, egui_context: ResMut<EguiContext>
         .default_width(200.0)
         .show(egui_context.ctx(), |ui| {
             ui.label("In Menu");
+            ui.checkbox(
+                &mut map_configuration.start_with_danger_zone,
+                "Start with danger zone",
+            );
+            input_float(
+                ui,
+                "Danger initial speed",
+                &mut map_configuration.speed_init_danger,
+            );
+            input_float(
+                ui,
+                "Danger speed gain",
+                &mut map_configuration.speed_gain_danger,
+            );
             if ui.button("Start").clicked() {
                 state.set(AppState::Loading);
             }
         });
+}
+
+fn input_float(ui: &mut egui::Ui, label: &str, value: &mut f32) {
+    ui.label(label);
+    let mut speed_init_danger = format!("{:.2}", value);
+    ui.text_edit_singleline(&mut speed_init_danger);
+    if let Ok(res) = speed_init_danger.parse::<f32>() {
+        *value = res;
+    }
 }
 fn game_menu(
     mut state: ResMut<State<AppState>>,

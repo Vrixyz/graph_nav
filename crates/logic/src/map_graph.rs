@@ -58,6 +58,28 @@ impl Default for RoomType {
     }
 }
 
+pub struct MapConfiguration {
+    pub start_with_danger_zone: bool,
+    pub speed_gain_danger: f32,
+    pub speed_init_danger: f32,
+    pub weight_room_danger: f32,
+    pub weight_room_shop: f32,
+    pub weight_room_normal: f32,
+}
+
+impl Default for MapConfiguration {
+    fn default() -> Self {
+        Self {
+            start_with_danger_zone: true,
+            speed_gain_danger: 0.1f32,
+            speed_init_danger: 10f32,
+            weight_room_danger: Default::default(),
+            weight_room_shop: Default::default(),
+            weight_room_normal: Default::default(),
+        }
+    }
+}
+
 pub struct MapCreateRoom {
     from_room_id: RoomId,
     room_type: RoomType,
@@ -150,6 +172,7 @@ impl Plugin for MapGraphPlugin {
         app.insert_resource(UserInputs::default());
         app.insert_resource(DangerSpeedModifier { multiplier: 1f32 });
         app.insert_resource(Coins { amount: 0u32 });
+        app.insert_resource(MapConfiguration::default());
     }
 }
 
@@ -187,7 +210,7 @@ fn loading_update(mut state: ResMut<State<AppState>>) {
     state.set(AppState::Game);
 }
 
-fn create_map(mut commands: Commands, time: Res<Time>) {
+fn create_map(mut commands: Commands, time: Res<Time>, map_configuration: Res<MapConfiguration>) {
     let mut cameraBundle = OrthographicCameraBundle::new_2d();
     cameraBundle.orthographic_projection.scale = 0.3;
     commands.spawn_bundle(cameraBundle).insert(MainCamera);
@@ -259,11 +282,12 @@ fn create_map(mut commands: Commands, time: Res<Time>) {
         will_move: None,
     });
     // Spawn a first danger zone
-    // /*
-    commands.spawn().insert(SpawnDangerZoneCommand {
-        position: [20f32, 20f32].into(),
-        radius_increase_per_second: 10f32,
-    }); // */
+    if map_configuration.start_with_danger_zone {
+        commands.spawn().insert(SpawnDangerZoneCommand {
+            position: [20f32, 20f32].into(),
+            radius_increase_per_second: map_configuration.speed_init_danger,
+        });
+    }
     commands.spawn().insert(Cooldown {
         last_action_time: time.seconds_since_startup() as f32,
         base_cooldown: 0.5f32,
@@ -377,6 +401,7 @@ fn react_to_move_player(
     mut coins: ResMut<Coins>,
     mut map: ResMut<MapDef>,
     mut danger_zone_grow_speedup: ResMut<DangerSpeedModifier>,
+    map_configuration: Res<MapConfiguration>,
     position_changed: Res<MapPosition>,
 ) {
     if !position_changed.is_changed() {
@@ -399,11 +424,12 @@ fn react_to_move_player(
             None
         },
     });
+    /*
     commands.spawn().insert(MapCreateRoom {
         from_room_id: position_changed.pos_id,
         room_type: RoomType::Danger,
         battle: None,
-    });
+    });*/
     commands.spawn().insert(MapCreateRoom {
         from_room_id: position_changed.pos_id,
         room_type: RoomType::Coins,
@@ -445,7 +471,7 @@ fn react_to_move_player(
             RoomType::Danger => {
                 commands.spawn().insert(SpawnDangerZoneCommand {
                     position: direction_for_danger + current_position,
-                    radius_increase_per_second: 9.5f32,
+                    radius_increase_per_second: map_configuration.speed_init_danger,
                 });
             }
             RoomType::Coins => {
