@@ -4,7 +4,7 @@ use crate::danger::{
 };
 use crate::delayed_destroy::destroy_after;
 use crate::graphics_rooms::{create_room, RoomGraphic};
-use crate::shapes::{CircleGaugeMaterial, ColorMaterial, ShapeMeshes, ShapesPlugin};
+use crate::shapes::{CircleGaugeMaterial, ShapeMeshes, ShapesPlugin};
 use crate::text_feedback::{show_text_feedback, spawn_text_feedback, TextFeedbackSpawn};
 use crate::AppState;
 use crate::{
@@ -12,15 +12,11 @@ use crate::{
     math_utils,
     poisson::Poisson,
 };
-use bevy::render::camera;
 use bevy::render::pipeline::RenderPipeline;
 use bevy::{prelude::*, render::camera::OrthographicProjection, utils::HashMap};
-use bevy_prototype_lyon::{
-    prelude::*,
-    shapes::{Circle, Line, RegularPolygon, RegularPolygonFeature},
-};
-use rand::RngCore;
-
+use bevy_prototype_lyon::{prelude::*, shapes::Line};
+use rand::{thread_rng, Rng, RngCore, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 pub struct MapGraphPlugin;
 
 #[derive(PartialEq, Eq, Hash, Default, Clone, Copy)]
@@ -62,9 +58,32 @@ pub struct MapConfiguration {
     pub start_with_danger_zone: bool,
     pub speed_gain_danger: f32,
     pub speed_init_danger: f32,
+
     pub weight_room_danger: f32,
     pub weight_room_shop: f32,
     pub weight_room_normal: f32,
+}
+
+pub struct RandomDeterministic {
+    pub random: ChaCha20Rng,
+    pub seed: u64,
+}
+
+impl Default for RandomDeterministic {
+    fn default() -> Self {
+        let seed = thread_rng().gen::<u64>();
+        Self {
+            random: ChaCha20Rng::seed_from_u64(seed),
+            seed,
+        }
+    }
+}
+
+impl RandomDeterministic {
+    pub fn set_seed(&mut self, seed: u64) {
+        self.seed = seed;
+        self.random = ChaCha20Rng::seed_from_u64(seed);
+    }
 }
 
 impl Default for MapConfiguration {
@@ -173,6 +192,7 @@ impl Plugin for MapGraphPlugin {
         app.insert_resource(DangerSpeedModifier { multiplier: 1f32 });
         app.insert_resource(Coins { amount: 0u32 });
         app.insert_resource(MapConfiguration::default());
+        app.insert_resource(RandomDeterministic::default());
     }
 }
 
@@ -210,7 +230,15 @@ fn loading_update(mut state: ResMut<State<AppState>>) {
     state.set(AppState::Game);
 }
 
-fn create_map(mut commands: Commands, time: Res<Time>, map_configuration: Res<MapConfiguration>) {
+fn create_map(
+    mut commands: Commands,
+    time: Res<Time>,
+    map_configuration: Res<MapConfiguration>,
+    mut random: ResMut<RandomDeterministic>,
+) {
+    let seed = random.seed;
+    random.set_seed(seed);
+
     let mut cameraBundle = OrthographicCameraBundle::new_2d();
     cameraBundle.orthographic_projection.scale = 0.3;
     commands.spawn_bundle(cameraBundle).insert(MainCamera);
@@ -240,7 +268,7 @@ fn create_map(mut commands: Commands, time: Res<Time>, map_configuration: Res<Ma
     }
     let mut new_map = MapDef { rooms: new_map };
 
-    let mut rng = rand::thread_rng();
+    let mut rng = &mut random.random;
     let mut room_id_to_create = RoomId(1);
     while root_index.0 < positions.len() && new_map.rooms.len() < nb_new_shapes {
         let ref_point = positions[root_index.0];
@@ -403,6 +431,7 @@ fn react_to_move_player(
     mut danger_zone_grow_speedup: ResMut<DangerSpeedModifier>,
     map_configuration: Res<MapConfiguration>,
     position_changed: Res<MapPosition>,
+    mut random: ResMut<RandomDeterministic>,
 ) {
     if !position_changed.is_changed() {
         return;
@@ -411,7 +440,7 @@ fn react_to_move_player(
         return;
     }
 
-    let mut rng = rand::thread_rng();
+    let rng = &mut random.random;
     commands.spawn().insert(MapCreateRoom {
         from_room_id: position_changed.pos_id,
         room_type: RoomType::Safe,
@@ -538,24 +567,25 @@ fn handle_input(
                 continue;
             }
             let r = map.rooms.get(id).unwrap();
-            match r.room_type {
-                RoomType::Danger => {}
-                RoomType::Safe => {}
-                RoomType::Coins => {}
-                RoomType::Price(price) => {
-                    if coins.amount < price {
-                        // TODO: spawn a feedback: not enough coins!
-                        commands.spawn().insert(TextFeedbackSpawn {
-                            text: format!("Not enough coins\n{}/{}", coins.amount, price),
-                            pos: r.position.into(),
-                        });
-                        continue;
-                    }
-                }
-            };
+
             let room_position = Vec2::new(r.position.0, r.position.1);
             let distance_to_room = room_position.distance(*click);
             if distance_to_room < 15.0 {
+                match r.room_type {
+                    RoomType::Danger => {}
+                    RoomType::Safe => {}
+                    RoomType::Coins => {}
+                    RoomType::Price(price) => {
+                        if coins.amount < price {
+                            // TODO: spawn a feedback: not enough coins!
+                            commands.spawn().insert(TextFeedbackSpawn {
+                                text: format!("Not enough coins\n{}/{}", coins.amount, price),
+                                pos: r.position.into(),
+                            });
+                            continue;
+                        }
+                    }
+                };
                 position.will_move = Some(*id);
                 cooldown.last_action_time = time.seconds_since_startup() as f32;
                 break;
@@ -568,12 +598,13 @@ fn handle_input(
 fn create_new_rooms(
     mut commands: Commands,
     shapes: Res<ShapeMeshes>,
+    mut random: ResMut<RandomDeterministic>,
     mut map: ResMut<MapDef>,
     q_create: Query<(Entity, &MapCreateRoom)>,
 ) {
     let min_distance_between_rooms = 40f32;
     for (e, create) in q_create.iter() {
-        let mut rng = rand::thread_rng();
+        let rng = &mut random.random;
         let poisson = Poisson::new();
         let existing_points: Vec<(f32, f32)> = map.rooms.values().map(|r| r.position).collect();
 
@@ -584,7 +615,7 @@ fn create_new_rooms(
                 &ref_point,
                 min_distance_between_rooms,
                 10,
-                &mut rng,
+                rng,
             ) {
                 {
                     match map.rooms.entry(create.from_room_id) {

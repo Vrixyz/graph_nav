@@ -2193,6 +2193,7 @@ dependencies = [
  "bevy_webgl2",
  "console_error_panic_hook",
  "rand",
+ "rand_chacha",
  "wasm-bindgen",
 ]
 

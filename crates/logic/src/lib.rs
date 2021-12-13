@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContext, EguiPlugin};
 use bevy_prototype_lyon::plugin::ShapePlugin;
-use map_graph::{Coins, MapConfiguration, MapGraphPlugin};
+use map_graph::{Coins, MapConfiguration, MapGraphPlugin, RandomDeterministic};
 use wasm_bindgen::prelude::*;
 
 pub mod combat;
@@ -42,6 +42,7 @@ impl Plugin for GamePlugin {
 fn ui_menu(
     mut state: ResMut<State<AppState>>,
     mut map_configuration: ResMut<MapConfiguration>,
+    mut random: ResMut<RandomDeterministic>,
     egui_context: ResMut<EguiContext>,
 ) {
     if state.current() != &AppState::Menu {
@@ -65,12 +66,25 @@ fn ui_menu(
                 "Danger speed gain",
                 &mut map_configuration.speed_gain_danger,
             );
+            let mut seed = random.seed;
+            input_u64(ui, "Random Seed", &mut seed);
+            if seed != random.seed {
+                random.set_seed(seed);
+            }
             if ui.button("Start").clicked() {
                 state.set(AppState::Loading);
             }
         });
 }
 
+fn input_u64(ui: &mut egui::Ui, label: &str, value: &mut u64) {
+    ui.label(label);
+    let mut speed_init_danger = format!("{:}", value);
+    ui.text_edit_singleline(&mut speed_init_danger);
+    if let Ok(res) = speed_init_danger.parse::<u64>() {
+        *value = res;
+    }
+}
 fn input_float(ui: &mut egui::Ui, label: &str, value: &mut f32) {
     ui.label(label);
     let mut speed_init_danger = format!("{:.2}", value);
