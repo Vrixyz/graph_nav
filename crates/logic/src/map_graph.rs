@@ -15,6 +15,8 @@ use crate::{
 use bevy::render::pipeline::RenderPipeline;
 use bevy::{prelude::*, render::camera::OrthographicProjection, utils::HashMap};
 use bevy_prototype_lyon::{prelude::*, shapes::Line};
+use rand::distributions::WeightedIndex;
+use rand::prelude::Distribution;
 use rand::{thread_rng, Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 pub struct MapGraphPlugin;
@@ -28,6 +30,7 @@ pub struct Room {
     pub connections: Vec<RoomId>,
     pub position: (f32, f32),
     pub room_type: RoomType,
+    pub visited: bool,
     pub entity: Entity,
 }
 pub struct RoomEntity {
@@ -40,7 +43,7 @@ pub struct MapDef {
     pub rooms: HashMap<RoomId, Room>,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Hash, Eq, Debug)]
 pub enum RoomType {
     Danger,
     Safe,
@@ -51,6 +54,58 @@ pub enum RoomType {
 impl Default for RoomType {
     fn default() -> Self {
         Self::Safe
+    }
+}
+
+pub struct RoomChanceWeights {
+    pub weights: [usize; 4],
+    pub weighted_index: WeightedIndex<usize>,
+    pub definitions: [RoomDefinition; 4],
+    pub rooms_to_create_on_move: u32,
+}
+
+impl RoomChanceWeights {
+    pub fn update_weights(&mut self) {
+        self.weighted_index = WeightedIndex::new(&self.weights).unwrap();
+    }
+}
+
+pub struct RoomDefinition {
+    pub type_room: RoomType,
+    pub battle_chance: f64,
+    pub max_rooms_create: u32,
+}
+
+impl Default for RoomChanceWeights {
+    fn default() -> Self {
+        let weights = [30, 50, 40, 20];
+        Self {
+            rooms_to_create_on_move: 5,
+            weights,
+            weighted_index: WeightedIndex::new(&weights).unwrap(),
+            definitions: [
+                RoomDefinition {
+                    type_room: RoomType::Danger,
+                    battle_chance: 0.1f64,
+                    max_rooms_create: 1,
+                },
+                RoomDefinition {
+                    type_room: RoomType::Safe,
+                    battle_chance: 0.3f64,
+                    max_rooms_create: 2,
+                },
+                RoomDefinition {
+                    type_room: RoomType::Coins,
+                    battle_chance: 0.5f64,
+                    max_rooms_create: 1,
+                },
+                RoomDefinition {
+                    type_room: RoomType::Price(7),
+                    battle_chance: 0.2f64,
+                    max_rooms_create: 1,
+                },
+            ],
+        }
     }
 }
 
@@ -101,8 +156,6 @@ impl Default for MapConfiguration {
 
 pub struct MapCreateRoom {
     from_room_id: RoomId,
-    room_type: RoomType,
-    battle: Option<Battle>,
 }
 
 pub struct MapPosition {
@@ -193,6 +246,7 @@ impl Plugin for MapGraphPlugin {
         app.insert_resource(Coins { amount: 0u32 });
         app.insert_resource(MapConfiguration::default());
         app.insert_resource(RandomDeterministic::default());
+        app.insert_resource(RoomChanceWeights::default());
     }
 }
 
@@ -263,6 +317,7 @@ fn create_map(
                         position: positions[i],
                     })
                     .id(),
+                visited: false,
             },
         );
     }
@@ -294,6 +349,7 @@ fn create_map(
                         position: new_position,
                     })
                     .id(),
+                visited: false,
             };
             {
                 new_map.rooms.insert(room_id_to_create, new_room);
@@ -431,7 +487,6 @@ fn react_to_move_player(
     mut danger_zone_grow_speedup: ResMut<DangerSpeedModifier>,
     map_configuration: Res<MapConfiguration>,
     position_changed: Res<MapPosition>,
-    mut random: ResMut<RandomDeterministic>,
 ) {
     if !position_changed.is_changed() {
         return;
@@ -439,43 +494,6 @@ fn react_to_move_player(
     if position_changed.will_move.is_some() {
         return;
     }
-
-    let rng = &mut random.random;
-    commands.spawn().insert(MapCreateRoom {
-        from_room_id: position_changed.pos_id,
-        room_type: RoomType::Safe,
-        battle: if rng.next_u32() % 5 == 0 {
-            Some(Battle {
-                hp: 1.0,
-                attack: 1.0,
-            })
-        } else {
-            None
-        },
-    });
-    /*
-    commands.spawn().insert(MapCreateRoom {
-        from_room_id: position_changed.pos_id,
-        room_type: RoomType::Danger,
-        battle: None,
-    });*/
-    commands.spawn().insert(MapCreateRoom {
-        from_room_id: position_changed.pos_id,
-        room_type: RoomType::Coins,
-        battle: if rng.next_u32() % 3 == 0 {
-            Some(Battle {
-                hp: 1.0,
-                attack: 1.0,
-            })
-        } else {
-            None
-        },
-    });
-    commands.spawn().insert(MapCreateRoom {
-        from_room_id: position_changed.pos_id,
-        room_type: RoomType::Price(7),
-        battle: None,
-    });
 
     if let Some(r) = map.rooms.get(&position_changed.pos_id) {
         let current_position = [r.position.0, r.position.1].into();
@@ -511,10 +529,16 @@ fn react_to_move_player(
                 danger_zone_grow_speedup.multiplier *= 0.5f32;
             }
         }
-        if r.room_type != RoomType::Safe {
-            // We visited this room so reset its type to Safe.
-            if let Some(r) = map.rooms.get_mut(&position_changed.pos_id) {
+        if let Some(r) = map.rooms.get_mut(&position_changed.pos_id) {
+            if r.room_type != RoomType::Safe {
+                // We visited this room so reset its type to Safe.
                 r.room_type = RoomType::Safe;
+            }
+            if !r.visited {
+                r.visited = true;
+                commands.spawn().insert(MapCreateRoom {
+                    from_room_id: position_changed.pos_id,
+                });
             }
         }
     }
@@ -598,83 +622,111 @@ fn handle_input(
 fn create_new_rooms(
     mut commands: Commands,
     shapes: Res<ShapeMeshes>,
+    room_chance: ResMut<RoomChanceWeights>,
     mut random: ResMut<RandomDeterministic>,
     mut map: ResMut<MapDef>,
     q_create: Query<(Entity, &MapCreateRoom)>,
 ) {
     let min_distance_between_rooms = 40f32;
+
     for (e, create) in q_create.iter() {
-        let rng = &mut random.random;
+        let mut rng = &mut random.random;
         let poisson = Poisson::new();
-        let existing_points: Vec<(f32, f32)> = map.rooms.values().map(|r| r.position).collect();
 
-        let room_id_to_create = RoomId(map.rooms.len());
-        if let Some(ref_point) = map.rooms.get(&create.from_room_id).map(|f| f.position) {
-            if let Some(new_position) = poisson.compute_new_position(
-                &existing_points,
-                &ref_point,
-                min_distance_between_rooms,
-                10,
-                rng,
-            ) {
-                {
-                    match map.rooms.entry(create.from_room_id) {
-                        std::collections::hash_map::Entry::Occupied(mut room) => {
-                            room.get_mut().connections.push(room_id_to_create);
-                        }
-                        std::collections::hash_map::Entry::Vacant(_) => return,
-                    };
-                }
-                let mut new_room = Room {
-                    connections: vec![create.from_room_id],
-                    position: new_position,
-                    entity: commands
-                        .spawn()
-                        .insert(RoomEntity {
-                            position: new_position,
+        let mut duplicates: std::collections::HashMap<&RoomType, u32> =
+            std::collections::HashMap::default();
+
+        for _ in 0..room_chance.rooms_to_create_on_move {
+            let existing_points: Vec<(f32, f32)> = map.rooms.values().map(|r| r.position).collect();
+            let room_id_to_create = RoomId(map.rooms.len());
+            if let Some(ref_point) = map.rooms.get(&create.from_room_id).map(|f| f.position) {
+                if let Some(new_position) = poisson.compute_new_position(
+                    &existing_points,
+                    &ref_point,
+                    min_distance_between_rooms,
+                    10,
+                    &mut rng,
+                ) {
+                    let type_index = room_chance.weighted_index.sample(&mut rng);
+                    let definition = &room_chance.definitions[type_index];
+                    //appearances.push(definition.type_room.clone());
+                    let counter = duplicates
+                        .entry(&definition.type_room)
+                        .or_insert(definition.max_rooms_create);
+                    if *counter == 0 {
+                        continue;
+                    }
+                    *counter -= 1;
+
+                    let battle = if rng.gen::<f64>() < definition.battle_chance {
+                        Some(Battle {
+                            hp: 1.0,
+                            attack: 1.0,
                         })
-                        .id(),
-                    room_type: create.room_type.clone(),
-                };
-                if let Some(battle) = &create.battle {
-                    commands
-                        .entity(new_room.entity)
-                        .insert(battle.clone())
-                        .insert(IsDirty);
-                }
-                create_room(&shapes, &mut commands, &new_room, room_id_to_create, true);
-                create_link(
-                    &mut commands,
-                    map.rooms.get(&create.from_room_id).unwrap(),
-                    &new_room,
-                );
+                    } else {
+                        None
+                    };
+                    let room_type = &definition.type_room;
+                    {
+                        match map.rooms.entry(create.from_room_id) {
+                            std::collections::hash_map::Entry::Occupied(mut room) => {
+                                room.get_mut().connections.push(room_id_to_create);
+                            }
+                            std::collections::hash_map::Entry::Vacant(_) => return,
+                        };
+                    }
+                    let mut new_room = Room {
+                        connections: vec![create.from_room_id],
+                        position: new_position,
+                        entity: commands
+                            .spawn()
+                            .insert(RoomEntity {
+                                position: new_position,
+                            })
+                            .id(),
+                        room_type: room_type.clone(),
+                        visited: false,
+                    };
+                    if let Some(battle) = &battle {
+                        commands
+                            .entity(new_room.entity)
+                            .insert(battle.clone())
+                            .insert(IsDirty);
+                    }
+                    create_room(&shapes, &mut commands, &new_room, room_id_to_create, true);
+                    create_link(
+                        &mut commands,
+                        map.rooms.get(&create.from_room_id).unwrap(),
+                        &new_room,
+                    );
 
-                let origin_position = map.rooms.get(&create.from_room_id).unwrap().position;
-                let mut existing_point_without_origin = existing_points.clone();
-                existing_point_without_origin.retain(|r| r != &origin_position);
-                let (closest_point, dist_sqrd) =
-                    find_closest(&existing_point_without_origin, &new_position);
+                    let origin_position = map.rooms.get(&create.from_room_id).unwrap().position;
+                    let mut existing_point_without_origin = existing_points.clone();
+                    existing_point_without_origin.retain(|r| r != &origin_position);
+                    let (closest_point, dist_sqrd) =
+                        find_closest(&existing_point_without_origin, &new_position);
 
-                if dist_sqrd < (min_distance_between_rooms * 1.5f32).powi(2) {
-                    let r1 = map
-                        .rooms
-                        .iter_mut()
-                        .find(|r| r.1.position == (closest_point.x, closest_point.y))
-                        .map(|room_from| {
-                            room_from.1.connections.push(room_id_to_create);
-                            room_from.0.clone()
-                        });
-                    if let Some(r1) = r1 {
-                        new_room.connections.push(r1);
-                        create_link(&mut commands, map.rooms.get(&r1).unwrap(), &new_room);
+                    if dist_sqrd < (min_distance_between_rooms * 1.5f32).powi(2) {
+                        let r1 = map
+                            .rooms
+                            .iter_mut()
+                            .find(|r| r.1.position == (closest_point.x, closest_point.y))
+                            .map(|room_from| {
+                                room_from.1.connections.push(room_id_to_create);
+                                room_from.0.clone()
+                            });
+                        if let Some(r1) = r1 {
+                            new_room.connections.push(r1);
+                            create_link(&mut commands, map.rooms.get(&r1).unwrap(), &new_room);
+                        }
+                    }
+
+                    {
+                        map.rooms.insert(room_id_to_create, new_room);
                     }
                 }
-
-                {
-                    map.rooms.insert(room_id_to_create, new_room);
-                }
+                commands.entity(e).despawn();
             }
-            commands.entity(e).despawn();
         }
     }
 }

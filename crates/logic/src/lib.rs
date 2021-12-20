@@ -1,7 +1,7 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, reflect::List};
 use bevy_egui::{egui, EguiContext, EguiPlugin};
 use bevy_prototype_lyon::plugin::ShapePlugin;
-use map_graph::{Coins, MapConfiguration, MapGraphPlugin, RandomDeterministic};
+use map_graph::{Coins, MapConfiguration, MapGraphPlugin, RandomDeterministic, RoomChanceWeights};
 use wasm_bindgen::prelude::*;
 
 pub mod combat;
@@ -42,6 +42,7 @@ impl Plugin for GamePlugin {
 fn ui_menu(
     mut state: ResMut<State<AppState>>,
     mut map_configuration: ResMut<MapConfiguration>,
+    mut chance_rooms: ResMut<RoomChanceWeights>,
     mut random: ResMut<RandomDeterministic>,
     egui_context: ResMut<EguiContext>,
 ) {
@@ -71,27 +72,85 @@ fn ui_menu(
             if seed != random.seed {
                 random.set_seed(seed);
             }
+            ui.collapsing("Room chances", |ui| {
+                let mut changed_weights = false;
+                changed_weights = changed_weights
+                    || input_usize(
+                        ui,
+                        "weight Danger",
+                        &mut chance_rooms.weights.get_mut(0).unwrap(),
+                    );
+                changed_weights = changed_weights
+                    || input_usize(
+                        ui,
+                        "weight Safe",
+                        &mut chance_rooms.weights.get_mut(1).unwrap(),
+                    );
+                changed_weights = changed_weights
+                    || input_usize(
+                        ui,
+                        "weight Coins",
+                        &mut chance_rooms.weights.get_mut(2).unwrap(),
+                    );
+                changed_weights = changed_weights
+                    || input_usize(
+                        ui,
+                        "weight Price",
+                        &mut chance_rooms.weights.get_mut(3).unwrap(),
+                    );
+                if changed_weights {
+                    chance_rooms.update_weights();
+                }
+            });
+
+            /*
+            pub struct RoomChanceWeights {
+                pub weighted_index: WeightedIndex<usize>,
+                pub definitions: [RoomDefinition; 4],
+                pub rooms_to_create_on_move: u32,
+            }
+            pub struct RoomDefinition {
+                pub type_room: RoomType,
+                pub battle_chance: f64,
+                pub max_rooms_create: u32,
+            }*/
             if ui.button("Start").clicked() {
                 state.set(AppState::Loading);
             }
         });
 }
-
-fn input_u64(ui: &mut egui::Ui, label: &str, value: &mut u64) {
+fn input_usize(ui: &mut egui::Ui, label: &str, value: &mut usize) -> bool {
     ui.label(label);
-    let mut speed_init_danger = format!("{:}", value);
-    ui.text_edit_singleline(&mut speed_init_danger);
-    if let Ok(res) = speed_init_danger.parse::<u64>() {
-        *value = res;
+    let mut input = format!("{:}", value);
+    if ui.text_edit_singleline(&mut input).changed() {
+        if let Ok(res) = input.parse::<usize>() {
+            *value = res;
+            return true;
+        }
     }
+    false
 }
-fn input_float(ui: &mut egui::Ui, label: &str, value: &mut f32) {
+fn input_u64(ui: &mut egui::Ui, label: &str, value: &mut u64) -> bool {
     ui.label(label);
-    let mut speed_init_danger = format!("{:.2}", value);
-    ui.text_edit_singleline(&mut speed_init_danger);
-    if let Ok(res) = speed_init_danger.parse::<f32>() {
-        *value = res;
+    let mut input = format!("{:}", value);
+    if ui.text_edit_singleline(&mut input).changed() {
+        if let Ok(res) = input.parse::<u64>() {
+            *value = res;
+            return true;
+        }
     }
+    false
+}
+fn input_float(ui: &mut egui::Ui, label: &str, value: &mut f32) -> bool {
+    ui.label(label);
+    let mut input = format!("{:.2}", value);
+    if ui.text_edit_singleline(&mut input).changed() {
+        if let Ok(res) = input.parse::<f32>() {
+            *value = res;
+            return true;
+        }
+    }
+    false
 }
 fn game_menu(
     mut state: ResMut<State<AppState>>,
