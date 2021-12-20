@@ -78,26 +78,14 @@ fn ui_menu(
                     || input_usize(
                         ui,
                         "weight Danger",
-                        &mut chance_rooms.weights.get_mut(0).unwrap(),
+                        chance_rooms.weights.get_mut(0).unwrap(),
                     );
                 changed_weights = changed_weights
-                    || input_usize(
-                        ui,
-                        "weight Safe",
-                        &mut chance_rooms.weights.get_mut(1).unwrap(),
-                    );
+                    || input_usize(ui, "weight Safe", chance_rooms.weights.get_mut(1).unwrap());
                 changed_weights = changed_weights
-                    || input_usize(
-                        ui,
-                        "weight Coins",
-                        &mut chance_rooms.weights.get_mut(2).unwrap(),
-                    );
+                    || input_usize(ui, "weight Coins", chance_rooms.weights.get_mut(2).unwrap());
                 changed_weights = changed_weights
-                    || input_usize(
-                        ui,
-                        "weight Price",
-                        &mut chance_rooms.weights.get_mut(3).unwrap(),
-                    );
+                    || input_usize(ui, "weight Price", chance_rooms.weights.get_mut(3).unwrap());
                 if changed_weights {
                     chance_rooms.update_weights();
                 }
